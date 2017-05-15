@@ -1,0 +1,137 @@
+#!/usr/bin/perl -w
+#==========================================================================
+# @file
+# Inspect WAV file header
+# http://soundfile.sapp.org/doc/WaveFormat/
+# http://www.robotplanet.dk/audio/wav_meta_data/
+#Offset  Size  Name             Description
+# 
+#The canonical WAVE format starts with the RIFF header:
+# 
+#0         4   ChunkID          Contains the letters "RIFF" in ASCII form
+#                               (0x52494646 big-endian form).
+#4         4   ChunkSize        36 + SubChunk2Size, or more precisely:
+#                               4 + (8 + SubChunk1Size) + (8 + SubChunk2Size)
+#                               This is the size of the rest of the chunk 
+#                               following this number.  This is the size of the 
+#                               entire file in bytes minus 8 bytes for the
+#                               two fields not included in this count:
+#                               ChunkID and ChunkSize.
+#8         4   Format           Contains the letters "WAVE"
+#                               (0x57415645 big-endian form).
+# 
+#The "WAVE" format consists of two subchunks: "fmt " and "data":
+#The "fmt " subchunk describes the sound data's format:
+# 
+#12        4   Subchunk1ID      Contains the letters "fmt "
+#                               (0x666d7420 big-endian form).
+#16        4   Subchunk1Size    16 for PCM.  This is the size of the
+#                               rest of the Subchunk which follows this number.
+#20        2   AudioFormat      PCM = 1 (i.e. Linear quantization)
+#                               Values other than 1 indicate some 
+#                               form of compression.
+#22        2   NumChannels      Mono = 1, Stereo = 2, etc.
+#24        4   SampleRate       8000, 44100, etc.
+#28        4   ByteRate         == SampleRate * NumChannels * BitsPerSample/8
+#32        2   BlockAlign       == NumChannels * BitsPerSample/8
+#                               The number of bytes for one sample including
+#                               all channels. I wonder what happens when
+#                               this number isn't an integer?
+#34        2   BitsPerSample    8 bits = 8, 16 bits = 16, etc.
+#          2   ExtraParamSize   if PCM, then doesn't exist
+#          X   ExtraParams      space for extra parameters
+# 
+#The "list" subchunk contains the size of the data and the actual sound:
+# 
+#36        4   Subchunk2ID      Contains the letters "list"
+#                               (0x???????? big-endian form).
+#40        4   Subchunk2Size    == LIST total len
+#                               This is the number of bytes in the LIST.
+#                               these bytes can be skipped.
+#The "data" subchunk contains the size of the data and the actual sound:
+# 
+#36        4   Subchunk2ID      Contains the letters "data"
+#                               (0x64617461 big-endian form).
+#40        4   Subchunk2Size    == NumSamples * NumChannels * BitsPerSample/8
+#                               This is the number of bytes in the data.
+#                               You can also think of this as the size
+#                               of the read of the subchunk following this 
+#                               number.
+#44        *   Data             The actual sound data.
+#
+# Created by Idan Regev (~iregev)
+#==========================================================================
+use strict;
+use warnings;
+use Fcntl; #This module is just a translation of the C fcntl.h file.
+
+my $header;
+my $oneByte;
+my $u_int8;
+
+my $filename = shift;
+open FILE, "<:raw", $filename or die "Couldn't open $filename!";
+
+#################### Header ####################
+my $riff;
+read(FILE, $riff, 12) or die "Error reading $filename!";
+my $fmt;
+read(FILE, $fmt, 24) or die "Error reading $filename!";
+
+# RIFF header: 'RIFF', long length, type='WAVE' 
+my ($r1,$r2,$r3) = unpack "A4VA4", $riff;
+# WAV header, 'fmt ', long length, short unused, short channels, 
+# long samples/second, long bytes per second, short bytes per sample, 
+# short bits per sample 
+my ($f1,$f2,$f3,$f4,$f5,$f6,$f7,$f8) = unpack "A4VvvVVvv",$fmt;
+
+my $AudioFormat = $f3;
+$AudioFormat = "PCM" if ($f3 == 1);
+
+#################### Data ####################
+my $junk=0;
+my $data;
+my ($d1,$d2);
+# Get rid of non DATA chunks. e.g. INFO
+while (1) {
+	read(FILE, $data, 8) or die "Error reading $filename!";
+	# DATA header, 'DATA', long length 
+	($d1,$d2) = unpack "A4V", $data;
+	last if (lc($d1) eq "data");
+	print "$d2: length $d2, skiping...\n";
+	read(FILE, $data, $d2) or die "Error reading $filename!";
+	$junk += 8 + $d2;
+}
+
+my $playlength = $d2/$f6;
+
+
+print << "EOF";
+RIFF header: $r1, length $r2, type $r3
+
+Format: $f1, length $f2, audio format $AudioFormat, channels $f4,
+       sample rate $f5, bytes per second $f6,
+       bytes per sample $f7, bits per sample $f8
+
+Junk: length $junk
+Data: $d1, length $d2
+Playlength: $playlength seconds
+EOF
+
+#my $bytesToProcess = $d2;
+
+#print "Processing $bytesToProcess bytes...\n";
+
+#read(FILE, $header, 44) or die "Error reading $filename!";
+#print "$header\n";
+#foreach my $offset (0 .. $bytesToProcess - 1) {
+#    read(FILE, $oneByte, 1) or die "Error reading $filename!";
+#    $u_int8 = unpack 'C', $oneByte;
+#     print $oneByte;
+#    printf "0x%04X\t%03d\n", $offset, $u_int8;
+#    print "$u_int8\n";
+#}
+
+close FILE;
+
+
