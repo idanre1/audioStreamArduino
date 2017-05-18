@@ -33,7 +33,7 @@ Streaming audio over serial port to arduino
 1. hfile
  Streaming arduino same file as Smith implementation.
  Also remote SW is provided.
-2.arduinoMaster
+2. arduinoMaster
  Code is more close to Matthew implementation.
  Also remote SW is provided.
  Biggest effort was **auto convert** wav file on the fly.
