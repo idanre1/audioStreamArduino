@@ -69,46 +69,77 @@ while (1) {
 	last if ($header =~ /GO/);
 }
 
-# Prepare 10bit long int
 my $audio_len = $wavLength;
-if (length($audio_len) > 10) { die "Audio length does not fit to 10 bit: " . length($audio_len); }
-my $charTen = "0" x (10-length($audio_len)) . $audio_len;
-
-print "Sending audio len: " . $charTen . "\n";
+my $TRANSFER_SIZE;
+print "Asking for TRANSFER_SIZE\n";
 while (1) {
-	$Arduino->communicate($charTen) or die 'Warning, empty string: ', "$!\n";
+	$Arduino->communicate('t') or die 'Warning, empty string: ', "$!\n";
 	$header = $Arduino->receive();
 	print "ARD:$header\n";
-	last if ($header =~ /$audio_len/);
+	if ($header =~ /(\d+)ACK/) {
+		$TRANSFER_SIZE=$1;
+		last;
+	}
+#	sleep(1);
 }
+print "TRANSFER_SIZE: $TRANSFER_SIZE\n";
 
 print "Entering loop...\n";
-my $send;
 my $count=0;
 my $j=0;
 my $tmp;
-while(1) {
+LOOP:while(1) {
 #	print "Read... " . ($audio_len - $count) . "\n";
-	$send = $Arduino->receive();
-	#chomp($send);
-#	print "ARD" . $j . "!\n";
-#	print "ARD:$send\n";
-#	print "|" . $j . "ARD\n";
-#	$j++;
-	foreach my $i (1..$send) {
-#	foreach my $i (1..128) {
-	#print "-scalar($audio[$count])+";
-		read($fh, $oneByte, 1) or die "Error reading $filename!";
-		$u_int8 = unpack 'C', $oneByte;
-		$tmp=$u_int8+0;
-		$tmp = 49 if ($tmp == 48);## PATCH ## Perl can't send 0 char, its probably null
+
+	$tmp = $Arduino->receive();
+	unless ($tmp =~ /\?/) {
+		print "Warning, arduino protocol violation: $tmp\n";
+		next LOOP;
+	} #else { print "ARD:$tmp\n"; }
+
+	$Arduino->communicate('p') or die 'Warning, empty string: ', "$!\n";
+	foreach my $i (1..$TRANSFER_SIZE) {
+
+		if ($count >= $audio_len) {
+		# Send zeroes to silence residue
+			$tmp=0;
+		} else {
+		#Still play
+			read($fh, $oneByte, 1) or die "Error reading $filename! count $count, len $audio_len";
+			$u_int8 = unpack 'C', $oneByte;
+			$tmp=$u_int8+0;
+			$tmp = 49 if ($tmp == 48);## PATCH ## Perl can't send 0 char, its probably null
+		}
 #		print "!$tmp|"; 
 		$Arduino->communicate(chr($tmp)) or die 'Warning, empty string: ', "$!\n";
 		$count++;
-	if ($count > $audio_len) {die "Fatal: arduino asked more than it should";}	
-	}	
+	} # foreach	
+        last if ($count > $audio_len); # Arduino don't knows when it will be done. perl should stop
+#	print "count $count, len $audio_len\n";
+#		last if ($count > 128);
+} # While
 
-	last if ($count == $audio_len);
-}
+
+print "info1\n";
+&info();
+sleep(3);
+print "info2\n";
+&info();
+sleep(3);
+print "info3\n";
+&info;
+
+$Arduino->communicate('s') or die 'Warning, empty string: ', "$!\n";
+$header = $Arduino->receive();
 
 print "DONE\n";
+
+
+sub info {
+	$Arduino->communicate('i') or die 'Warning, empty string: ', "$!\n";
+	while (1) {
+		$header = $Arduino->receive();
+		print "$header\n";
+		last if ($header =~ /ACK/);
+	}
+}

@@ -276,7 +276,7 @@ void setup()
    //This only leaves 44% of the time free for processing
    //bytes.
    Serial.begin(115200);
-   
+   Serial.println("GO");
    reset();
 
 }//End Setup

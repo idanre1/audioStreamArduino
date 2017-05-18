@@ -86,7 +86,7 @@ while(1) {
 #		print "!$tmp|"; 
 		$Arduino->communicate(chr($tmp)) or die 'Warning, empty string: ', "$!\n";
 		$count++;
-	if ($count > $audio_len) {die "Fatal: arduino asked more than it should";}	
+	last if ($count >= $audio_len); # {die "Fatal: arduino asked more than it should";}	
 	}	
 
 	last if ($count == $audio_len);

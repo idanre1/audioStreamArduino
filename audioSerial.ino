@@ -18,7 +18,8 @@
  allows ~5 seconds of audio at best.  2. To change the adudio,
  the microcontroller would need to be re-programmed with a new
  sounddata.h file.
- Matthew solution was only half cooked, had some minor bugs, mainly MIPS consumption was bad.
+ Matthew solution was only half cooked, had some minor bugs, mainly program memory footprint was bad.
+ For some reason the implementation was not ready for infinite playing.
  Also no PC end SW was introduced.
  
  StreamingAudio overcomes these limitations by dynamically 
@@ -29,25 +30,18 @@
  Two variables exists to tweak this:
  BUFFER_SIZE, TRANSFER_SIZE.
  
- The only limit on length is the number of samples must fit
- into an long integer.  (ie:  4,294,967,295 samples).
- At 8000 samples / second, that allows 8,947 minutes of audio.
- Even this could be overcome if needed.  (The only reason to
- have the number of samples is to know when to turn the speaker
- off.)
- 
- 
  
  Remote Host
  -----------
- 1.  After serial setup wait for GO command. This is important since
+ 1.  After serial init wait for GO command. This is important since
      sometimes the uart buffer has residues from prev operation
 
- 1.  Sends 10 bytes of data representing the number 
-     of samples.  Each byte is 1 digit of an unsigned long.
- 
- 
- 2.  Each time the host recieves a byte it sends the next
+ 2.  Send arduino command opcode.
+
+ 3.  If the command is play, send TRANSFET_SIZE from remote to arduino
+     TRANSFER_SIZE can be determined using related command opcode.  
+
+ 4.  Each time the host send command opcode it sends the next
      TRANSFER_SIZE audio samples to fill the Arduino's receive pingpong buffer.
  
  */
@@ -58,47 +52,41 @@
 #include <avr/pgmspace.h>
 
 #define SAMPLE_RATE 8000
-#define BUFFER_SIZE 128
+#define BUFFER_SIZE 256
 #define TRANSFER_SIZE 64
 //#define SERIAL_BUFFER_SIZE 512 // ToDo patch in HardwareSerial.cpp inside /usr/share/arduino/hardware/arduino/cores/arduino/
 
 void startPlayback();
 void stopPlayback();
-long powlong(long x, long y);
+void captureByte();
 void reset();
 
+unsigned char sounddata_data[BUFFER_SIZE]; // ping pong buffer
+unsigned char serial_read;                 // opcode helper
+int BufferHead=0;              // ping pong buffer ptr
+int BufferTail=0;              // ping pong buffer ptr
 
-unsigned long sounddata_length=0;
-unsigned char sounddata_data[BUFFER_SIZE];
-int BufferHead=0;
-int HalfBufferSize=BUFFER_SIZE/2;
-int BufferTail=0;
-unsigned long sample=0;
-unsigned long BytesReceived=0;
+unsigned long sample=0;        // How many bytes samples to speaker
+unsigned long BytesReceived=0; // How many bytes received in serial
 
-unsigned long Temp=0;
-unsigned long NewTemp=0;
+int Playing = 0;               // Indication if arduino currently playing
 
 int ledPin = 13;
 int speakerPin = 11;
-int Playing = 0;
 
 //Interrupt Service Routine (ISR)
 // This is called at 8000 Hz to load the next sample.
-ISR(TIMER1_COMPA_vect) 
-{
+ISR(TIMER1_COMPA_vect) {
     //If not at the end of audio
-    if (sample < sounddata_length)   
-    {
+    if (sample < BytesReceived) {
         //Set the PWM Freq.
         OCR2A = sounddata_data[BufferTail];
         //If circular buffer is not empty
-        if (BufferTail != BufferHead)  
-        {
+        if (BufferTail != BufferHead) {
         //Increment Buffer's tail index.
-		if (++BufferTail >= BUFFER_SIZE) BufferTail = 0; //BufferTail = ((BufferTail+1) % BUFFER_SIZE);
-        //Increment sample number.
-        sample++;
+	    if (++BufferTail >= BUFFER_SIZE) BufferTail = 0; //BufferTail = ((BufferTail+1) % BUFFER_SIZE);
+            //Increment sample number.
+            sample++;
         }//End if
     }//End if
     else //We are at the end of audio
@@ -109,8 +97,99 @@ ISR(TIMER1_COMPA_vect)
 
 }//End Interrupt
 
-void startPlayback()
-{
+void setup() {
+    //Set LED for OUTPUT mode
+    pinMode(ledPin, OUTPUT);
+    
+    //Start Serial port.  If your application can handle a
+    //faster baud rate, that would increase your bandwidth
+    //115200 only allows for 14,400 Bytes/sec.  Audio will
+    //require 8000 bytes / sec to play at the correct speed.
+    //This only leaves 44% of the time free for processing 
+    //bytes.
+    Serial.begin(115200);
+    Serial.println("GO"); // Tell streamer arduino waiting for command
+
+}//End Setup
+
+void loop() {
+  //If audio not started yet...
+  if (Playing == 0) {
+  	//Check to see if the first 1000 bytes are buffered.
+  	if ((BytesReceived-sample) >= (TRANSFER_SIZE)) {
+//		Serial.println("YAY");
+    		startPlayback();
+  	}//End if
+  }//End if
+  
+  //While the serial port buffer has data
+  while (Serial.available()>0) {
+
+    //If the sample buffer isn't full    
+    if (((BufferHead+1) % BUFFER_SIZE) != BufferTail) {
+
+    //if the Serial port starting new buffer
+//---------------------------------------
+// Command portion
+//---------------------------------------
+    if ((BytesReceived % TRANSFER_SIZE) == 0) {
+		if (sample > (16 * BUFFER_SIZE)) {
+			// Handling infinite streaming. reduce counters
+			BytesReceived -= 8 * BUFFER_SIZE;
+			sample -= 8 * BUFFER_SIZE;
+		}
+
+    Serial.println("?"); // Tell streamer arduino waiting for command
+	serial_read = Serial.read(); 
+	switch (serial_read) {
+	case 'p': // 'p' for Play buffer
+		// next TRANSFER_SIZE bytes will be operated as data
+		// TRANSFER_SIZE start with command opcode.
+		// If special thing needs to be done it will be presented
+		// in this case. else its just continue playing the buffer
+		// keep in mind TRANSFER_SIZE is only the "neto" size without the opcode.
+		while (Serial.available() == 0) { } // make sure first byte is arrived
+		captureByte();
+		break;
+	case 't': // 't' for TRANSFER_SIZE. tell streamer what is the supported TRANSFER_EIZE
+		Serial.print(uint8_t(TRANSFER_SIZE));
+		Serial.println("ACKt");
+		break;
+	case 's': // 's' for stop playing
+		stopPlayback();
+		Serial.println("ACKs");
+		break;
+	case 'i': // 'i' for info
+		Serial.print("BytesReceived:");
+		Serial.println(BytesReceived);
+		Serial.print("sample:");
+		Serial.println(sample);
+                Serial.print("Playing:");
+                Serial.println(Playing);
+		Serial.println("ACKi");
+		break;
+	}// switch
+    }//End if "command opcode/sample buffer isn't full"
+//---------------------------------------
+// Data portion
+//---------------------------------------
+    else { // This is the data portion of the transfer
+	captureByte();
+   }
+   }//End if "sample buffer isn't full"
+}//End While
+}//End Loop
+
+void captureByte() {
+	//Store the sample freq.
+	sounddata_data[BufferHead] = Serial.read();
+	//Increment the buffer's head index.
+	BufferHead = (BufferHead+1) % BUFFER_SIZE;
+	//Increment the bytes received
+	BytesReceived++;
+}
+
+void startPlayback() {
     //Set pin for OUTPUT mode.
     pinMode(speakerPin, OUTPUT);
 
@@ -152,10 +231,6 @@ void startPlayback()
     OCR2A = sounddata_data[BufferTail];
 
 
-
-
-
-
     //--------TIMER 1----------------------------------
     // Set up Timer 1 to send a sample every interrupt.
     // This will interrupt at the sample rate (8000 hz)
@@ -182,8 +257,9 @@ void startPlayback()
 
 
     //Init Sample.  Start from the beginning of audio.
-    sample = 0;
-    
+//TODO    sample = 0;
+    Playing=1;
+
     //Enable Interrupts
     sei();  
 }//End StartPlayback
@@ -192,8 +268,9 @@ void startPlayback()
 
 
 
-void stopPlayback()
-{
+void stopPlayback() {
+    Playing=0;
+    
     // Disable playback per-sample interrupt.
     TIMSK1 &= ~_BV(OCIE1A);
 
@@ -206,121 +283,4 @@ void stopPlayback()
     digitalWrite(speakerPin, LOW);
 }//End StopPlayback
 
-
-
-    //Use the custom powlong() function because the standard
-    //pow() function uses floats and has rounding errors.
-    //This powlong() function does only integer powers.
-    //Be careful not to use powers that are too large, otherwise
-    //this function could take a really long time.
-long powlong(long x, long y)
-{
-  //Base case for recursion
-  if (y==0)
-  {
-    return(1);
-  }//End if
-  else
-  {
-    //Do recursive call.
-    return(powlong(x,y-1)*x);
-  }//End Else
-}
-
-
-
-void setup()
-{
-    //Set LED for OUTPUT mode
-    pinMode(ledPin, OUTPUT);
-    
-    //Start Serial port.  If your application can handle a
-    //faster baud rate, that would increase your bandwidth
-    //115200 only allows for 14,400 Bytes/sec.  Audio will
-    //require 8000 bytes / sec to play at the correct speed.
-    //This only leaves 44% of the time free for processing 
-    //bytes.
-    Serial.begin(115200);
-    Serial.println("GO");
-
-    //PC sends audio length as 10-digit ASCII
-    //While audio length hasn't arrived yet
-    while (Serial.available()<10)
-    {
-    //Blink the LED on pin 13.
-    digitalWrite(ledPin,!digitalRead(ledPin));
-    delay(100);
-    }
-    digitalWrite(ledPin,1);
-    
-    //Init number of audio samples.
-    sounddata_length=0;
-    
-    //Convert 10 ASCII digits to an unsigned long.
-    for (int i=0;i<10;i++)
-    {
-    //Convert from ASCII to int
-    Temp=Serial.read()-48; 
-    
-    //Shift the digit the correct location.
-    NewTemp = Temp * powlong(10,9-i);  
-    //Add the current digit to the total.
-    sounddata_length = sounddata_length + NewTemp;
-    }//End for
-
-    //Tell the remote PC/device that the Arduino is ready
-    //to begin receiving samples.
-    Serial.println(sounddata_length);
-    Serial.println(uint8_t(TRANSFER_SIZE));
-       
-    //There's data now, so start playing.
-    //startPlayback();
-    Playing =0;
-}//End Setup
-
-void loop()
-{
-  //If audio not started yet...
-  if (Playing == 0)
-  {
-  //Check to see if the first 1000 bytes are buffered.
-  if (BufferHead >= HalfBufferSize)
-  {
-    Playing=1;
-    startPlayback();
-  }//End if
-  }//End if
-  
-  //While the serial port buffer has data
-  while (Serial.available()>0) 
-  {
-    //If the sample buffer isn't full    
-    if (((BufferHead+1) % BUFFER_SIZE) != BufferTail)
-    {
-    //Store the sample freq.
-    sounddata_data[BufferHead] = Serial.read();
-    //Increment the buffer's head index.
-    BufferHead = (BufferHead+1) % BUFFER_SIZE;
-    //Increment the bytes received
-    BytesReceived++;
-    }//End if
-    
-    //if the Serial port buffer has room
-    if ((BytesReceived % TRANSFER_SIZE) == 0) {
-      //Tell the remote PC how much bytes you want.
-	  if ((sounddata_length - BytesReceived) < TRANSFER_SIZE) { 
-		  Serial.println(uint8_t(sounddata_length - BytesReceived));
-	  }
-	  else {
-		  Serial.println(uint8_t(TRANSFER_SIZE));
-	  }
-      // Serial.print("!");
-      // Serial.println(sounddata_data[BufferHead]);
-	  //Serial.println("@");
-    }//End if
-  }//End While
-  
- 
-
-}//End Loop
 
