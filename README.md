@@ -29,27 +29,13 @@ Streaming audio over serial port to arduino
  StreamingAudio also gives the coder a posibility add new commands to arduino to execute during the middle of the run.
  I have used this feature to play music during the time operating a DC motor on/off.
 
-## Code types
-1. hfile
- Streaming arduino same file as Smith implementation.
- Also remote SW is provided.
-2. arduinoMaster
- Code is more close to Matthew implementation.
- Also remote SW is provided.
- Biggest effort was **auto convert** wav file on the fly.
- __Notice inside music there is a convert.sh file__ that outputs 8bit PCM file from original,
- still in wav file format.
- The play file can handle this wav file completely!
-3. StreamingAudio implementation
+## StreamingAudio implementation
 Best implementation, with the ability to send other command using serial and not only streaming music.
 Implementation uses a pingpong buffer for the audio samples, using my own
 exprience two 64KB buffer is enough when using 115200 baud.
 Two variables exists to tweak this:
 BUFFER_SIZE, TRANSFER_SIZE.
-
-
- Remote Host
- -----------
+### Remote Host
  1.  After serial init, wait for GO command. This is important since
      sometimes the serial buffer has residues from prev operation. (called goblins)
 
@@ -61,3 +47,22 @@ BUFFER_SIZE, TRANSFER_SIZE.
  4.  Each time the host send command opcode it sends the next
      TRANSFER_SIZE audio samples to fill the Arduino's receive pingpong buffer.
 
+
+## More implementations
+I developed this code in stages. I also provide some major implementation which might hele somebody
+### hfile
+ Streaming arduino same file as Smith implementation.
+ Also remote SW is provided.
+### arduinoMaster
+ Code is more close to Matthew implementation.
+ Also remote SW is provided.
+ Biggest effort was **auto convert** wav file on the fly.
+ __Notice inside music there is a convert.sh file__ that outputs 8bit PCM file from original,
+ still in wav file format.
+ The play file can handle this wav file completely!
+#### Remote Host
+ 1.  Sends 10 bytes of data representing the number 
+     of samples.  Each byte is 1 digit of an unsigned long.
+ 2.  Each time the host recieves a byte it sends the next
+     128 audio samples to fill the Arduino's receive buffer.
+  
