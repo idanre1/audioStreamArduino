@@ -41,10 +41,10 @@ BUFFER_SIZE, TRANSFER_SIZE.
 
  2.  Send arduino command opcode.
 
- 3.  If the command is play, send TRANSFET_SIZE from remote to arduino
-     TRANSFER_SIZE can be determined using related command opcode.
+ 3.  If the command is TRANSFER_SIZE, remote is asking arduino for its supported TRANSFET_SIZE
+     TRANSFER_SIZE is the best chunk of data arduino is able to process in one opcode.
 
- 4.  Each time the host send command opcode it sends the next
+ 4.  Each time the host send play command opcode it sends the next
      TRANSFER_SIZE audio samples to fill the Arduino's receive pingpong buffer.
 
 
@@ -60,6 +60,17 @@ I developed this code in stages. I also provide some major implementation which 
  __Notice inside music there is a convert.sh file__ that outputs 8bit PCM file from original,
  still in wav file format.
  The play file can handle this wav file completely!
+#### Master Is receiving byte using fetch protocol
+ 1.  After serial init, wait for GO command. This is important since
+     sometimes the serial buffer has residues from prev operation. (called goblins)
+
+ 2.  Send arduino command opcode.
+
+ 3.  If the command is play, send TRANSFET_SIZE from remote to arduino
+     TRANSFER_SIZE can be determined using related command opcode.
+
+ 4.  Each time the host send command opcode it sends the next
+     TRANSFER_SIZE audio samples to fill the Arduino's receive pingpong buffer.
 #### Remote Host
  1.  Sends 10 bytes of data representing the number 
      of samples.  Each byte is 1 digit of an unsigned long.
