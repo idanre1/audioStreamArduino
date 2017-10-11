@@ -1,4 +1,5 @@
-build-nano328/audioSerialHfile.o: audioSerialHfile.ino \
+build-nano328/core/Tone.o: \
+ /usr/share/arduino/hardware/arduino/cores/arduino/Tone.cpp \
  /usr/share/arduino/hardware/arduino/cores/arduino/Arduino.h \
  /usr/share/arduino/hardware/arduino/cores/arduino/binary.h \
  /usr/share/arduino/hardware/arduino/cores/arduino/WCharacter.h \

@@ -29,6 +29,12 @@
  exprience two 64KB buffer is enough when using 115200 baud.
  Two variables exists to tweak this:
  BUFFER_SIZE, TRANSFER_SIZE.
+
+ Allocated resources
+ -------------------
+ TIMER 0 (8  bit): FREE. Can be uses to PWM pins 5,6
+ TIMER 1 (16 bit): Used to send sample every irq (8000hz) - Disables PWM on pins 9,10
+ TIMER 2 (8  bit): Used to PWM on the speaker pin         - Disables PWM on pins 11,3
  
  
  Remote Host
@@ -38,10 +44,10 @@
 
  2.  Send arduino command opcode.
 
- 3.  If the command is play, send TRANSFET_SIZE from remote to arduino
-     TRANSFER_SIZE can be determined using related command opcode.  
+ 3.  If the command is TRANSFER_SIZE, remote is asking arduino for its supported TRANSFET_SIZE
+     TRANSFER_SIZE is the best chunk of data arduino is able to process in one opcode.
 
- 4.  Each time the host send command opcode it sends the next
+ 4.  Each time the host send play command opcode it sends the next
      TRANSFER_SIZE audio samples to fill the Arduino's receive pingpong buffer.
  
  */
@@ -50,9 +56,10 @@
 #include <avr/interrupt.h>
 #include <avr/io.h>
 #include <avr/pgmspace.h>
+#include <SoftwareSerial.h>
 
 #define SAMPLE_RATE 8000
-#define BUFFER_SIZE 256
+#define BUFFER_SIZE 128
 #define TRANSFER_SIZE 64
 //#define SERIAL_BUFFER_SIZE 512 // ToDo patch in HardwareSerial.cpp inside /usr/share/arduino/hardware/arduino/cores/arduino/
 
@@ -70,9 +77,11 @@ unsigned long sample=0;        // How many bytes samples to speaker
 unsigned long BytesReceived=0; // How many bytes received in serial
 
 int Playing = 0;               // Indication if arduino currently playing
+//int postData = 0;
 
 int ledPin = 13;
 int speakerPin = 11;
+int motorPin = 8;
 
 //Interrupt Service Routine (ISR)
 // This is called at 8000 Hz to load the next sample.
@@ -97,9 +106,12 @@ ISR(TIMER1_COMPA_vect) {
 
 }//End Interrupt
 
+SoftwareSerial swSerial(10, 12); // RX, TX
 void setup() {
     //Set LED for OUTPUT mode
     pinMode(ledPin, OUTPUT);
+	pinMode(motorPin, OUTPUT);
+	digitalWrite(motorPin, LOW);
     
     //Start Serial port.  If your application can handle a
     //faster baud rate, that would increase your bandwidth
@@ -107,8 +119,9 @@ void setup() {
     //require 8000 bytes / sec to play at the correct speed.
     //This only leaves 44% of the time free for processing 
     //bytes.
-    Serial.begin(115200);
-    Serial.println("GO"); // Tell streamer arduino waiting for command
+    swSerial.begin(115200);
+    swSerial.println("GO"); // Tell streamer arduino has started
+//    swSerial.println("?");  // Tell streamer arduino waiting for command
 
 }//End Setup
 
@@ -117,13 +130,13 @@ void loop() {
   if (Playing == 0) {
   	//Check to see if the first 1000 bytes are buffered.
   	if ((BytesReceived-sample) >= (TRANSFER_SIZE)) {
-//		Serial.println("YAY");
+//		swSerial.println("YAY");
     		startPlayback();
   	}//End if
   }//End if
   
   //While the serial port buffer has data
-  while (Serial.available()>0) {
+  while (swSerial.available()>0) {
 
     //If the sample buffer isn't full    
     if (((BufferHead+1) % BUFFER_SIZE) != BufferTail) {
@@ -139,8 +152,7 @@ void loop() {
 			sample -= 8 * BUFFER_SIZE;
 		}
 
-    Serial.println("?"); // Tell streamer arduino waiting for command
-	serial_read = Serial.read(); 
+	serial_read = swSerial.read(); 
 	switch (serial_read) {
 	case 'p': // 'p' for Play buffer
 		// next TRANSFER_SIZE bytes will be operated as data
@@ -148,28 +160,39 @@ void loop() {
 		// If special thing needs to be done it will be presented
 		// in this case. else its just continue playing the buffer
 		// keep in mind TRANSFER_SIZE is only the "neto" size without the opcode.
-		while (Serial.available() == 0) { } // make sure first byte is arrived
+//		postData = 1;
+		while (swSerial.available() == 0) { } // make sure first byte is arrived
 		captureByte();
 		break;
 	case 't': // 't' for TRANSFER_SIZE. tell streamer what is the supported TRANSFER_EIZE
-		Serial.print(uint8_t(TRANSFER_SIZE));
-		Serial.println("ACKt");
+		swSerial.print(uint8_t(TRANSFER_SIZE));
+		swSerial.println("ACKt");
 		break;
 	case 's': // 's' for stop playing
 		stopPlayback();
-		Serial.println("ACKs");
+		swSerial.println("ACKs");
 		break;
 	case 'i': // 'i' for info
-		Serial.print("BytesReceived:");
-		Serial.println(BytesReceived);
-		Serial.print("sample:");
-		Serial.println(sample);
-                Serial.print("Playing:");
-                Serial.println(Playing);
-		Serial.println("ACKi");
+		swSerial.print("BytesReceived:");
+		swSerial.println(BytesReceived);
+		swSerial.print("sample:");
+		swSerial.println(sample);
+                swSerial.print("Playing:");
+                swSerial.println(Playing);
+		swSerial.println("ACKi");
+		break;
+	case 'm': // 'm' for motor On
+		digitalWrite(motorPin, HIGH);
+		swSerial.println("ACKm");
+		break;
+	case 'M': // 'M' for motor Off
+		digitalWrite(motorPin, LOW);
+		swSerial.println("ACKM");
 		break;
 	}// switch
-    }//End if "command opcode/sample buffer isn't full"
+	swSerial.println("?"); // Tell streamer arduino waiting for command
+
+    }//End if if the Serial port starting new buffer
 //---------------------------------------
 // Data portion
 //---------------------------------------
@@ -182,7 +205,7 @@ void loop() {
 
 void captureByte() {
 	//Store the sample freq.
-	sounddata_data[BufferHead] = Serial.read();
+	sounddata_data[BufferHead] = swSerial.read();
 	//Increment the buffer's head index.
 	BufferHead = (BufferHead+1) % BUFFER_SIZE;
 	//Increment the bytes received
@@ -198,7 +221,7 @@ void startPlayback() {
     // pin.  
     //This plays the music at the frequency of the audio sample.
 
-    // Use internal clock (datasheet p.160)
+    // Use internal clock (datasheet p.160) newpdf.p213
     //ASSR = Asynchronous Status Register
     ASSR &= ~(_BV(EXCLK) | _BV(AS2));
 
@@ -207,20 +230,20 @@ void startPlayback() {
     TCCR2A |= _BV(WGM21) | _BV(WGM20);
     TCCR2B &= ~_BV(WGM22);
 
-		// Do non-inverting PWM on pin OC2A (p.155)
+    // Do non-inverting PWM on pin OC2A (p.155)
     // On the Arduino this is pin 11.
-    TCCR2A = (TCCR2A | _BV(COM2A1)) & ~_BV(COM2A0);
-    TCCR2A &= ~(_BV(COM2B1) | _BV(COM2B0));
+    TCCR2A = (TCCR2A | _BV(COM2A1)) & ~_BV(COM2A0); //Clear OC2A on Compare Match, set OC2A at BOTTOM (non-inverting mode)
+    TCCR2A &= ~(_BV(COM2B1) | _BV(COM2B0)); // Normal port operation, OC2B disconnected
 
     // No prescaler (p.158)
     TCCR2B = (TCCR2B & ~(_BV(CS12) | _BV(CS11))) | _BV(CS10);
 
-    //16000000 cycles       1 increment    2000000 increments
+    //16000000 cycles       1 increment    2000000 increments   (16000000/8=2000000)
     //--------        *  ----            = -------
     //       1 second       8 cycles             1 second
 
     //Continued...
-    //2000000 increments     1 overflow      7812 overflows
+    //2000000 increments     1 overflow      7812 overflows     (2000000/256=7812) overflows per second
     //-------            * ---            = -----
     //      1 second       256 increments       1 second
 

@@ -11,23 +11,19 @@ use Data::Dumper;
 # ------------------------------
 # Config
 # ------------------------------
-#my $com = '/dev/ttyUSB0';
-my $com = '/dev/rfcomm0';
-my $pid = open my $fhOut, "| rfcomm connect hci0 00:00:00:00:00:00", or die "Unable to fork BT";
-print "Tell me when BT is on!\n";
-my $BTinput = <STDIN>;
-print "rfcomm0 PID: $pid\n";
+my $com = '/dev/ttyUSB0';
+#my $com = '/dev/rfcomm0';
+
 
 # ------------------------------
 # Inits
 # ------------------------------
 my @audio;
-my $Arduino;
 
-$Arduino = SerialArduino->new(
+my $Arduino = SerialArduino->new(
   port     => "$com",
   baudrate => 115200,
-#  stopbits => 1,
+ 
   databits => 8,
   parity   => 'none',
 );
@@ -40,7 +36,7 @@ if ($#ARGV != 0) { die "Usage: $0 <audio_file>\n"; }
 my $filename=$ARGV[0];
 print "Process audio file $filename\n";
 
-my $wavInfo = qx /.\/wavInfo $filename/;
+my $wavInfo = qx /wavInfo $filename/;
 #print $wavInfo;
 my $header;
 my $hdr_size=44;
@@ -74,7 +70,7 @@ print "Play file: $filename\n";
 # Init arduino
 # ------------------------------
 print "Waiting for arduino to setup serial\n";
-while (not defined $pid) {
+while (1) {
 	$header = $Arduino->receive();
 	print "ARD:$header\n";
 	last if ($header =~ /GO/);

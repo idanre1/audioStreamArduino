@@ -1,7 +1,7 @@
 # Makefile for creating C program / Arduino code
 
 ###################### ARDUINO ######################
-ARDUINO_LIBS = SoftwareSerial
+#ARDUINO_LIBS = SevSeg
 #USER_LIB_PATH = /nas/iot/arduino/ard-lib
 
 ################## MAKEFILE inputs ##################

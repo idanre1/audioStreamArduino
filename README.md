@@ -50,9 +50,13 @@ BUFFER_SIZE, TRANSFER_SIZE.
 
 ## More implementations
 I developed this code in stages. I also provide some major implementation which might hele somebody
-### hfile
- Streaming arduino same file as Smith implementation.
- Also remote SW is provided.
+### arduinoSlaveHW
+Almost identical to arduinoSlaveSw except the data is fed from HW serial pins of the arduino instead
+of the current implementation contains the data from SW serial.
+SW serial implementation gives the ability to send the data using BT hc-05 alike module.
+
+There are also minor bug fixes in the arduinoSlaveSw w.r.t arduinoSlaveHW version.
+
 ### arduinoMaster
  Code is more close to Matthew implementation.
  Also remote SW is provided.
@@ -76,4 +80,7 @@ I developed this code in stages. I also provide some major implementation which 
      of samples.  Each byte is 1 digit of an unsigned long.
  2.  Each time the host recieves a byte it sends the next
      128 audio samples to fill the Arduino's receive buffer.
+### hfile
+ Streaming arduino same file as Smith implementation.
+ Also remote SW is provided.
   

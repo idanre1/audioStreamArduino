@@ -1,4 +1,4 @@
-build-nano328/audioSerialHfile.o: audioSerialHfile.ino \
+build-nano328/audioSerial.o: audioSerial.ino \
  /usr/share/arduino/hardware/arduino/cores/arduino/Arduino.h \
  /usr/share/arduino/hardware/arduino/cores/arduino/binary.h \
  /usr/share/arduino/hardware/arduino/cores/arduino/WCharacter.h \
